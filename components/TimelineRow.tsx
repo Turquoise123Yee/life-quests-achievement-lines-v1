@@ -118,7 +118,7 @@ export const TimelineRow: React.FC<TimelineRowProps> = ({
         {/* 1. Base Line */}
         <line
           x1="0" y1={centerY}
-          x2="50000" y2={centerY}
+          x2="1000000" y2={centerY}
           stroke={colorHex}
           strokeWidth={baseThickness}
           strokeOpacity={0.3}

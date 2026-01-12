@@ -216,11 +216,18 @@ function App() {
 
   // --- Render Helpers ---
 
+  // Calculate total width needed based on zoom and end year
+  const endYear = 2100;
+  const maxDate = new Date(endYear, 0, 1).getTime();
+  const totalWidth = Math.max(
+    window.innerWidth, 
+    (maxDate - startDate) / (1000 * 60 * 60 * 24) * zoomLevel + 200 // Add buffer
+  );
+
   // Time Scale Markers
   const renderTimeScale = () => {
     const elements = [];
     const startYear = new Date(startDate).getFullYear();
-    const endYear = startYear + 10; // Render enough future
     
     // Thresholds
     const showAllMonths = zoomLevel >= 1.0;
@@ -368,8 +375,11 @@ function App() {
             </div>
           </div>
 
-          {/* Timeline Body */}
-          <div className="flex-1 min-w-[300vw] relative">
+          {/* Timeline Body - Dynamic Width */}
+          <div 
+            className="flex-1 relative"
+            style={{ minWidth: totalWidth }}
+          >
              {/* Background Grid */}
              <div className="absolute inset-0 z-0">
                {renderTimeScale()}
