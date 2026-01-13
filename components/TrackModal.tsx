@@ -1,5 +1,6 @@
+
 import React, { useState } from 'react';
-import { Track, COLORS, EMOJIS } from '../types';
+import { Track, COLORS, EMOJI_CATEGORIES } from '../types';
 import { X, Check } from 'lucide-react';
 
 interface TrackModalProps {
@@ -46,7 +47,7 @@ export const TrackModal: React.FC<TrackModalProps> = ({ isOpen, onClose, onSave,
         </div>
 
         {/* Form Content */}
-        <div className="p-6 space-y-6 max-h-[50vh] overflow-y-auto no-scrollbar">
+        <div className="p-6 space-y-8 max-h-[50vh] overflow-y-auto no-scrollbar">
           
           {/* Colors */}
           <div>
@@ -65,19 +66,26 @@ export const TrackModal: React.FC<TrackModalProps> = ({ isOpen, onClose, onSave,
             </div>
           </div>
 
-          {/* Icons */}
+          {/* Icons Categorized */}
           <div>
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 block">Icon</label>
-            <div className="grid grid-cols-6 gap-2">
-              {EMOJIS.map((e) => (
-                <button
-                  key={e}
-                  onClick={() => setIcon(e)}
-                  className={`text-2xl p-2 rounded-xl hover:bg-slate-100 transition-colors ${icon === e ? 'bg-slate-100 ring-1 ring-slate-200' : ''}`}
-                >
-                  {e}
-                </button>
-              ))}
+             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 block">Icon</label>
+             <div className="space-y-6">
+                {Object.entries(EMOJI_CATEGORIES).map(([category, emojis]) => (
+                    <div key={category}>
+                        <h4 className="text-[10px] font-bold text-slate-300 uppercase tracking-widest mb-2">{category}</h4>
+                        <div className="grid grid-cols-6 gap-2">
+                        {emojis.map((e) => (
+                            <button
+                            key={e}
+                            onClick={() => setIcon(e)}
+                            className={`text-2xl p-2 rounded-xl hover:bg-slate-100 transition-colors ${icon === e ? 'bg-slate-100 ring-1 ring-slate-200' : ''}`}
+                            >
+                            {e}
+                            </button>
+                        ))}
+                        </div>
+                    </div>
+                ))}
             </div>
           </div>
         </div>
