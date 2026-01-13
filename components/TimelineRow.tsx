@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useMemo } from 'react';
 import { Track, LifeNode, NodeType } from '../types';
 import { getColorHex } from '../constants';
 
@@ -11,6 +11,13 @@ interface TimelineRowProps {
   onEditNode: (node: LifeNode) => void;
 }
 
+// Define label positions relative to center Y
+const LANE_OFFSETS = [
+    { x: 12, y: 12 },   // Lane 0: Standard (Bottom Right)
+    { x: 12, y: 32 },   // Lane 1: Lower (Stacked below)
+    { x: 12, y: -45 },  // Lane 2: Upper (Top Right)
+];
+
 export const TimelineRow: React.FC<TimelineRowProps> = ({
   track,
   nodes,
@@ -19,13 +26,11 @@ export const TimelineRow: React.FC<TimelineRowProps> = ({
   onAddNode,
   onEditNode,
 }) => {
-  const sortedNodes = [...nodes].sort((a, b) => a.timestamp - b.timestamp);
+  const sortedNodes = useMemo(() => [...nodes].sort((a, b) => a.timestamp - b.timestamp), [nodes]);
   
   // Configuration
   const rowHeight = 120;
   const centerY = rowHeight / 2;
-  const baseThickness = 1.5;
-  const milestoneThickness = 3.5;
   const colorHex = getColorHex(track.color);
 
   // Long press state
@@ -35,6 +40,88 @@ export const TimelineRow: React.FC<TimelineRowProps> = ({
 
   // Helper to get X position
   const getX = (timestamp: number) => (timestamp - startDate) / (1000 * 60 * 60 * 24) * zoomLevel;
+
+  // --- Label Collision Logic ---
+  const positionedNodes = useMemo(() => {
+    // We track the 'end X' pixel of the last label in each lane
+    const laneEnds = [-1000, -1000, -1000]; // Initialize far left
+    const MIN_GAP = 20; // Minimum pixels between labels in same lane
+    const LABEL_WIDTH_ESTIMATE = 100; // Rough estimate of label width in pixels
+
+    return sortedNodes.map(node => {
+        const x = getX(node.timestamp);
+        let chosenLane = 0;
+
+        // Try to find the first lane where this label fits
+        let found = false;
+        for(let i=0; i < LANE_OFFSETS.length; i++) {
+            if (x > laneEnds[i] + MIN_GAP) {
+                chosenLane = i;
+                found = true;
+                break;
+            }
+        }
+        
+        // If not found (super dense), just cycle lanes to distribute overlap
+        if (!found) {
+             let minEnd = laneEnds[0];
+             let minIdx = 0;
+             for(let i=1; i < LANE_OFFSETS.length; i++) {
+                 if (laneEnds[i] < minEnd) {
+                     minEnd = laneEnds[i];
+                     minIdx = i;
+                 }
+             }
+             chosenLane = minIdx;
+        }
+
+        // Update lane end
+        laneEnds[chosenLane] = x + LABEL_WIDTH_ESTIMATE;
+
+        return {
+            ...node,
+            x,
+            laneIndex: chosenLane
+        };
+    });
+  }, [sortedNodes, zoomLevel, startDate]);
+
+  // --- Generate Dynamic Line Segments ---
+  const lineSegments = useMemo(() => {
+    const segments = [];
+    const milestoneNodes = sortedNodes.filter(n => n.type === NodeType.MILESTONE);
+    
+    // Start with base thickness
+    let currentThickness = 2.0; 
+    const THICKNESS_STEP = 0.75;
+    
+    // Start very far left to ensure line covers past events if zoomed out or scrolled back
+    let cursorX = -100000; 
+
+    milestoneNodes.forEach((node) => {
+        const x = getX(node.timestamp);
+        // Add segment from cursor to this milestone
+        segments.push({
+            x1: cursorX,
+            x2: x,
+            thickness: currentThickness
+        });
+        
+        // Update cursor and thickness for next segment
+        cursorX = x;
+        currentThickness += THICKNESS_STEP;
+    });
+
+    // Add final segment to infinity (far right)
+    segments.push({
+        x1: cursorX,
+        x2: 1000000,
+        thickness: currentThickness
+    });
+
+    return segments;
+  }, [sortedNodes, zoomLevel, startDate]);
+
 
   const handleStart = (e: React.MouseEvent | React.TouchEvent) => {
     isLongPressTriggered.current = false;
@@ -48,10 +135,6 @@ export const TimelineRow: React.FC<TimelineRowProps> = ({
 
     startPosRef.current = { x: clientX, y: 0 };
     
-    // Only set the timer if we are sure it's a potential click/long-press
-    // If it's multi-touch (pinch), the pinch handler in App.tsx prevents default, 
-    // but here we might still get touchstart for the first finger.
-    // However, usually we don't want to trigger if 2 fingers are down.
     if ('touches' in e && e.touches.length > 1) {
         return;
     }
@@ -68,7 +151,7 @@ export const TimelineRow: React.FC<TimelineRowProps> = ({
       onAddNode(track.id, clickedTimestamp);
       
       if (navigator.vibrate) navigator.vibrate(50);
-    }, 1000); // Increased to 1000ms
+    }, 800);
   };
 
   const handleMove = (e: React.MouseEvent | React.TouchEvent) => {
@@ -76,7 +159,6 @@ export const TimelineRow: React.FC<TimelineRowProps> = ({
     
     let clientX;
     if ('touches' in e) {
-       // If a second finger touches down during the wait, cancel the long press
        if(e.touches.length > 1) {
            if (timerRef.current) clearTimeout(timerRef.current);
            timerRef.current = null;
@@ -115,77 +197,80 @@ export const TimelineRow: React.FC<TimelineRowProps> = ({
         onTouchEnd={handleEnd}
         onContextMenu={(e) => e.preventDefault()}
       >
-        {/* 1. Base Line */}
-        <line
-          x1="0" y1={centerY}
-          x2="1000000" y2={centerY}
-          stroke={colorHex}
-          strokeWidth={baseThickness}
-          strokeOpacity={0.3}
-          strokeLinecap="round"
-        />
-
-        {/* 2. Milestone Segments */}
-        {sortedNodes.map((node, i) => {
-          if (node.type !== NodeType.MILESTONE) return null;
-          const startX = getX(node.timestamp);
-          
-          const nextMilestone = sortedNodes.slice(i + 1).find(n => n.type === NodeType.MILESTONE);
-          const endX = nextMilestone ? getX(nextMilestone.timestamp) : startX + 5000;
-
-          return (
+        {/* 1. Progressive Line Segments */}
+        {lineSegments.map((seg, i) => (
             <line
-              key={`line-${node.id}`}
-              x1={startX} y1={centerY}
-              x2={endX} y2={centerY}
-              stroke={colorHex}
-              strokeWidth={milestoneThickness}
-              strokeOpacity={0.6}
-              strokeLinecap="butt"
+                key={`track-seg-${i}`}
+                x1={seg.x1} y1={centerY}
+                x2={seg.x2} y2={centerY}
+                stroke={colorHex}
+                strokeWidth={seg.thickness}
+                strokeOpacity={0.8}
+                strokeLinecap="butt"
             />
-          );
-        })}
+        ))}
 
-        {/* 3. Moment Bulges */}
+        {/* 2. Moment Bulges (Optional: can remain as small highlighting segments or be removed if cluttering) */}
         {sortedNodes.map((node) => {
           if (node.type !== NodeType.MOMENT) return null;
           const x = getX(node.timestamp);
+          
+          // Determine local thickness at this point to ensure bulge is visible
+          // Simple heuristic: Find the segment this node belongs to
+          const segment = lineSegments.find(s => x >= s.x1 && x < s.x2) || lineSegments[0];
+          const bulgeThickness = segment.thickness + 4; 
+
           return (
             <line
               key={`bulge-${node.id}`}
-              x1={x - 10 * (node.weight/5)} y1={centerY}
-              x2={x + 10 * (node.weight/5)} y2={centerY}
+              x1={x - 8} y1={centerY}
+              x2={x + 8} y2={centerY}
               stroke={colorHex}
-              strokeWidth={milestoneThickness * 0.8}
-              strokeOpacity={0.6}
+              strokeWidth={bulgeThickness}
+              strokeOpacity={0.8}
               strokeLinecap="round"
             />
           );
         })}
 
-        {/* 5. Nodes (Bubbles) */}
-        {sortedNodes.map((node) => {
-          const x = getX(node.timestamp);
+        {/* 3. Nodes (Bubbles) */}
+        {positionedNodes.map((node) => {
+          const x = node.x;
           const radius = 10 + (node.weight * 3);
           
-          // Position labels offset from center
-          const labelOffsetX = 12; 
-          const labelOffsetY = 12;
-
+          // Get offset based on calculated lane
+          const offset = LANE_OFFSETS[node.laneIndex];
+          
           return (
             <g 
               key={node.id} 
               className="group cursor-pointer"
               onClick={(e) => {
+                // Allow bubble click to propagate if needed, but here we want to edit
+                // We stop propagation to avoid triggering the background 'add node' logic if click was fast
+                // But we handle 'drag anywhere' in App.tsx by not stopping propagation on MouseDown.
+                // Here, onClick is fine.
+                // Actually, previous request said "drag anywhere", so we removed stopPropagation on MouseDown.
+                // We keep onClick to trigger Edit.
                 e.stopPropagation();
                 if (!isLongPressTriggered.current) {
                   onEditNode(node);
                 }
               }}
-              onMouseDown={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
+              // Removed stopPropagation for MouseDown/TouchStart to allow global drag
             >
-              {/* The Bubble - Use cx/cy instead of group transform */}
+              {/* Connection Line for offset labels (Lane 2 - Upper) */}
+              {node.laneIndex === 2 && (
+                 <line 
+                   x1={x} y1={centerY - 10} 
+                   x2={x + 8} y2={centerY + offset.y + 15}
+                   stroke={colorHex}
+                   strokeWidth={1}
+                   strokeOpacity={0.5}
+                 />
+              )}
+
+              {/* The Bubble */}
               <circle
                 cx={x}
                 cy={centerY}
@@ -193,26 +278,32 @@ export const TimelineRow: React.FC<TimelineRowProps> = ({
                 fill={colorHex}
                 fillOpacity={0.2}
                 className="mix-blend-multiply transition-all duration-300 ease-out group-hover:fill-opacity-40 group-hover:scale-110"
-                style={{ mixBlendMode: 'multiply' }}
+                style={{ 
+                    mixBlendMode: 'multiply',
+                    transformBox: 'fill-box',
+                    transformOrigin: 'center'
+                }}
               />
               
-              {/* Inner core for milestones */}
               {node.type === NodeType.MILESTONE && (
-                <circle cx={x} cy={centerY} r={4} fill={colorHex} fillOpacity={0.8} />
+                <circle cx={x} cy={centerY} r={4} fill={colorHex} fillOpacity={1} />
               )}
 
-              {/* Title Label - Bottom Right of Center */}
-              {/* Using explicit x/y coordinates instead of group transform to ensure stability */}
+              {/* Title Label */}
               <foreignObject 
-                x={x + labelOffsetX} 
-                y={centerY + labelOffsetY} 
+                x={x + offset.x} 
+                y={centerY + offset.y} 
                 width={200} 
                 height={60} 
                 className="overflow-visible pointer-events-none"
                 style={{ overflow: 'visible' }}
               >
                  <div className="flex flex-col items-start justify-start">
-                    <span className="text-xs font-medium text-slate-800 bg-white/60 backdrop-blur-sm px-1.5 py-0.5 rounded-md shadow-sm opacity-100 whitespace-nowrap font-sans">
+                    <span 
+                        className={`text-xs font-medium text-slate-800 bg-white/70 backdrop-blur-sm px-1.5 py-0.5 rounded-md shadow-sm opacity-100 whitespace-nowrap font-sans border border-white/50
+                            ${node.laneIndex === 2 ? 'mb-1' : ''} 
+                        `}
+                    >
                       {node.title}
                     </span>
                     <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity pl-0.5 font-sans">
