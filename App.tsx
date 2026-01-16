@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { Plus, ZoomIn, ZoomOut, Download, Upload, GripVertical } from 'lucide-react';
 import { Track, LifeNode } from './types';
@@ -6,10 +7,38 @@ import { TimelineRow } from './components/TimelineRow';
 import { TrackModal } from './components/TrackModal';
 import { NodeModal } from './components/NodeModal';
 
+const STORAGE_KEY = 'life_quests_v1_data';
+
 function App() {
-  // --- State ---
-  const [tracks, setTracks] = useState<Track[]>(DEFAULT_TRACKS);
-  const [nodes, setNodes] = useState<LifeNode[]>(DEFAULT_NODES);
+  // --- State with Persistence ---
+  
+  // Initialize from LocalStorage if available
+  const [tracks, setTracks] = useState<Track[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.tracks) return parsed.tracks;
+      }
+    } catch (e) {
+      console.error("Failed to load tracks from storage", e);
+    }
+    return DEFAULT_TRACKS;
+  });
+
+  const [nodes, setNodes] = useState<LifeNode[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.nodes) return parsed.nodes;
+      }
+    } catch (e) {
+      console.error("Failed to load nodes from storage", e);
+    }
+    return DEFAULT_NODES;
+  });
+
   const [zoomLevel, setZoomLevel] = useState(INITIAL_ZOOM);
   
   // Start date (e.g., 3 years ago from now)
@@ -38,6 +67,17 @@ function App() {
 
   // Touch refs for pinch-to-zoom
   const touchDistRef = useRef<number | null>(null);
+
+  // --- Persistence Effect ---
+  // Automatically save whenever tracks or nodes change
+  useEffect(() => {
+    const dataToSave = {
+      tracks,
+      nodes,
+      lastUpdated: Date.now()
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+  }, [tracks, nodes]);
 
   // --- Handlers ---
 
@@ -250,11 +290,7 @@ function App() {
         container.removeEventListener('touchend', handleTouchEnd);
         container.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [zoomLevel, startDate]); // Dependencies needed for calculation inside handlers if closure captures old state, but here we use functional state updates or refs. Wait, centerTime calc needs current zoomLevel.
-
-  // NOTE: The useEffect listeners capture `zoomLevel` from closure. 
-  // We need to make sure they are recreated when zoomLevel changes OR use a ref for currentZoom.
-  // Re-binding listeners on every zoom change is okay for this scale.
+  }, [zoomLevel, startDate]);
 
   // --- Sidebar Reorder Logic ---
 
